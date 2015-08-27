@@ -22,17 +22,12 @@ double size2;
 triple size3; // Move to class.
 
 
-// Store the vertex and the normal vector, given the directional derivatives
-// bu in the u direction and bv in the v direction.
-GLuint vertex(const triple V, const triple& bu, const triple& bv)
+// Store the vertex and the normal vector.
+GLuint vertex(const triple V, const triple& n)
 {
   buffer.push_back(V.getx());
   buffer.push_back(V.gety());
   buffer.push_back(V.getz());
-
-  triple n=unit(triple(bu.gety()*bv.getz()-bu.getz()*bv.gety(),
-                       bu.getz()*bv.getx()-bu.getx()*bv.getz(),
-                       bu.getx()*bv.gety()-bu.gety()*bv.getx()));
 
   buffer.push_back(n.getx());
   buffer.push_back(n.gety());
@@ -103,6 +98,81 @@ triple displacement(const triple *controls)
 
   return d;
 }
+
+// Compute normal here.
+//
+triple bezierP(triple a, triple b, triple c, triple d, double t)
+{
+  return 3.0*(b-a);
+}
+
+triple bezierPP(triple a, triple b, triple c, triple d, double t)
+{
+  return 6.0*(a+c-2.0*b);
+}
+
+triple bezierPPP(triple a, triple b, triple c, triple d)
+{
+  return 6.0*(d-a+3.0*(b-c));
+}
+
+triple normal0(triple left3, triple left2, triple left1,
+                            triple middle,
+                            triple right1, triple right2, triple right3,
+                            double epsilon) {
+  //cout << "normal0 called." << endl;
+  // Lots of repetition here.
+  triple n=0.5*(cross(bezierPP(middle,right1,right2,right3,0),
+                      bezierP(middle,left1,left2,left3,0))+
+                cross(bezierP(middle,right1,right2,right3,0),
+                      bezierPP(middle,left1,left2,left3,0)));
+  triple n2=
+  0.25*cross(bezierPP(middle,right1,right2,right3,0),
+             bezierPP(middle,left1,left2,left3,0))+
+  1/6.0*(cross(bezierP(middle,right1,right2,right3,0),
+             bezierPPP(middle,left1,left2,left3))+
+       cross(bezierPPP(middle,right1,right2,right3),
+             bezierP(middle,left1,left2,left3,0)))+
+  1/12.0*(cross(bezierPPP(middle,right1,right2,right3),
+              bezierPP(middle,left1,left2,left3,0))+
+        cross(bezierPP(middle,right1,right2,right3,0),
+              bezierPPP(middle,left1,left2,left3)))+
+  1/36.0*cross(bezierPPP(middle,right1,right2,right3),
+             bezierPPP(middle,left1,left2,left3));
+  cout << "n1:" << unit(n) << endl << "n2:" << unit(n2) << endl;
+  if(length(n) > epsilon) {
+    cout << "using second order" << endl;
+    return n;
+  } else {
+    cout << "using third order" << endl;
+    return n2;
+  }
+  return length(n) > epsilon ? n : n2;
+  //return false ? n :
+}
+
+
+triple normal(triple left3, triple left2, triple left1, triple middle,
+               triple right1, triple right2, triple right3) {
+  triple bu=right1-middle;
+  triple bv=left1-middle;
+  triple n=unit(triple(bu.gety()*bv.getz()-bu.getz()*bv.gety(),
+                       bu.getz()*bv.getx()-bu.getx()*bv.getz(),
+                       bu.getx()*bv.gety()-bu.gety()*bv.getx()));
+  //triple n=cross(partialu(u,v),partialv(u,v));
+
+  double epsilon=1e-8*max(max(max(max(max(
+    length(left3-middle),length(left2-middle)),length(left1-middle)),
+    length(right1-middle)),length(right2-middle)),length(right3-middle));
+  //return false ? n :
+  cout << "n:" << unit(n) << endl;
+  if(length(n) > epsilon) {
+    return n;
+  } else {
+    return normal0(left3,left2,left1,middle,right1,right2,right3,epsilon);
+  }
+}
+
 // Pi is the full precision value indexed by Ii.
 // The 'flati' are flatness flags for each boundary.
 void render(const triple *p, int n,
@@ -196,7 +266,7 @@ void render(const triple *p, int n,
 
     triple l210=0.5*(px4x+l201); // =c120
     triple r012=0.5*(px4x+r102); // =c021
-    triple l300=0.5*(l201+r102); // =r003=c030
+    triple l300=0.5*(l201+r102); // =l300=c030
 
     triple r021=0.5*(pxx4+r120); // =c012
     triple u201=0.5*(u210+pxx4); // =c102
@@ -247,9 +317,13 @@ void render(const triple *p, int n,
       else pp3=r030;
     }
 
-    a1=vertex(pp1,l210-l300,l201-l300);
-    a2=vertex(pp2,l021-l030,l120-l030);
-    a3=vertex(pp3,r021-r030,r120-r030);
+
+    a1=vertex(pp1,normal(l003,l102,l201,l300,l210,l120,l030));
+    a2=vertex(pp2,normal(l300,l210,l120,l030,l021,l012,l003));
+    a3=vertex(pp3,normal(r300,r210,r120,r030,r021,r012,l300));
+    //a1=vertex(pp1,l210-l300,l201-l300);
+    //a2=vertex(pp2,l021-l030,l120-l030);
+    //a3=vertex(pp3,r021-r030,r120-r030);
 
     triple l[]={l003,l102,l012,l201,l111,l021,l300,l210,l120,l030}; // left
     triple r[]={l300,r102,r012,r201,r111,r021,r300,r210,r120,r030}; // right
@@ -282,9 +356,9 @@ void render(const triple *p, int n,
 
 // n is the maximum depth
 void render(const triple *p, int n=8) {
-  GLuint p0=vertex(p[0],-p[0]+p[1],-p[0]+p[2]);
-  GLuint p1=vertex(p[6],-p[3]+p[6],-p[3]+p[7]);
-  GLuint p2=vertex(p[9],-p[5]+p[8],-p[5]+p[9]);
+  GLuint p0=vertex(p[0],normal(p[9],p[5],p[2],p[0],p[1],p[3],p[6]));
+  GLuint p1=vertex(p[6],normal(p[0],p[1],p[3],p[6],p[7],p[8],p[9]));
+  GLuint p2=vertex(p[9],normal(p[6],p[7],p[8],p[9],p[5],p[2],p[0]));
 
   if(n > 0) {
     render(p,n,p0,p1,p2,p[0],p[6],p[9],false,false,false);
@@ -380,7 +454,7 @@ void renderNoAdaptive(const triple *p, int n, GLuint I0, GLuint I1, GLuint I2)
 
     triple l210=0.5*(px4x+l201); // =c120
     triple r012=0.5*(px4x+r102); // =c021
-    triple l300=0.5*(l201+r102); // =r003=c030
+    triple l300=0.5*(l201+r102); // =l300=c030
 
     triple r021=0.5*(pxx4+r120); // =c012
     triple u201=0.5*(u210+pxx4); // =c102
@@ -396,9 +470,13 @@ void renderNoAdaptive(const triple *p, int n, GLuint I0, GLuint I1, GLuint I2)
     triple c111=0.25*(p033+p330+p303+p111);
 
     //  For each edge of the triangle store points in the GLU array accordingly
-    GLuint a1=vertex(l300,l210-l300,l201-l300);
-    GLuint a2=vertex(l030,l021-l030,l120-l030);
-    GLuint a3=vertex(r030,r021-r030,r120-r030);
+    GLuint a1=vertex(l300,normal(l003,l102,l201,l300,l210,l120,l030));
+    GLuint a2=vertex(l030,normal(l300,l210,l120,l030,l021,l012,l003));
+    GLuint a3=vertex(r030,normal(r300,r210,r120,r030,r021,r012,l300));
+
+    //GLuint a1=vertex(l300,l210-l300,l201-l300);
+    //GLuint a2=vertex(l030,l021-l030,l120-l030);
+    //GLuint a3=vertex(r030,r021-r030,r120-r030);
 
     triple l[]={l003,l102,l012,l201,l111,l021,l300,l210,l120,l030}; // left
     triple r[]={l300,r102,r012,r201,r111,r021,r300,r210,r120,r030}; // right
@@ -416,9 +494,12 @@ void renderNoAdaptive(const triple *p, int n, GLuint I0, GLuint I1, GLuint I2)
 // n is the depth
 void renderNoAdaptive(const triple *p, int n=8)
 {
-  GLuint p0=vertex(p[0],-p[0]+p[1],-p[0]+p[2]);
-  GLuint p1=vertex(p[6],-p[3]+p[6],-p[3]+p[7]);
-  GLuint p2=vertex(p[9],-p[5]+p[8],-p[5]+p[9]);
+  GLuint p0=vertex(p[0],normal(p[9],p[5],p[2],p[0],p[1],p[3],p[6]));
+  GLuint p1=vertex(p[6],normal(p[0],p[1],p[3],p[6],p[7],p[8],p[9]));
+  GLuint p2=vertex(p[9],normal(p[6],p[7],p[8],p[9],p[5],p[2],p[0]));
+  //GLuint p0=vertex(p[0],-p[0]+p[1],-p[0]+p[2]);
+  //GLuint p1=vertex(p[6],-p[3]+p[6],-p[3]+p[7]);
+  //GLuint p2=vertex(p[9],-p[5]+p[8],-p[5]+p[9]);
 
   if(n > 0) {
     renderNoAdaptive(p,n,p0,p1,p2);
